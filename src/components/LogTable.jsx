@@ -1,7 +1,12 @@
 import React from 'react';
-import { MoreVertical, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { MoreVertical, CheckCircle, Clock, XCircle, Download } from 'lucide-react';
+import { exportToCSV } from '../utils/csvExport';
 
 const LogTable = ({ title, data, columns }) => {
+    const handleExport = () => {
+        exportToCSV(data, columns, `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}`);
+    };
+
     const getStatusBadge = (status) => {
         let styles = {
             display: 'inline-flex',
@@ -17,6 +22,7 @@ const LogTable = ({ title, data, columns }) => {
             case 'approved':
             case 'confirmed':
             case 'auto-confirmed':
+            case 'checked-in':
                 return <span style={{ ...styles, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent)' }}><CheckCircle size={12} /> {status}</span>;
             case 'pending':
                 return <span style={{ ...styles, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}><Clock size={12} /> {status}</span>;
@@ -49,63 +55,77 @@ const LogTable = ({ title, data, columns }) => {
     };
 
     return (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '1.125rem', fontWeight: 600 }}>{title}</h3>
-                <button style={{ backgroundColor: 'transparent', padding: '0.25rem', color: 'var(--text-muted)' }}>
-                    <MoreVertical size={20} />
-                </button>
+        <div className="card animate-fade-in" style={{ padding: '1.5rem', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>{title}</h3>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        onClick={handleExport}
+                        style={{
+                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                            color: 'var(--text-muted)',
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '8px',
+                            border: '1px solid var(--glass-border)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <Download size={14} /> CSV
+                    </button>
+                </div>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+
+            <div style={{ overflowX: 'auto', margin: '0 -1.75rem' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                     <thead>
-                        <tr style={{ backgroundColor: 'var(--background)' }}>
+                        <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
                             {columns.map((col, idx) => (
-                                <th key={idx} style={{ padding: '1rem 1.5rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                <th key={idx} style={{
+                                    padding: '1rem 1.75rem',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    color: 'var(--text-muted)',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.05em',
+                                    borderBottom: '1px solid var(--glass-border)'
+                                }}>
                                     {col.header}
                                 </th>
                             ))}
-                            <th style={{ padding: '1rem 1.5rem' }}></th>
                         </tr>
                     </thead>
                     <tbody>
                         {data.length === 0 ? (
                             <tr>
-                                <td colSpan={columns.length + 1} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                    No recent records found.
+                                <td colSpan={columns.length} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    No records found for today.
                                 </td>
                             </tr>
                         ) : (
-                            data.map((row, rowIdx) => {
-                                const isStaff = row.type === 'Staff';
-                                const isVisitor = row.type === 'Visitor';
-
-                                return (
-                                    <tr
-                                        key={rowIdx}
-                                        style={{
-                                            borderBottom: '1px solid var(--border)',
-                                            transition: 'var(--transition)',
-                                            backgroundColor: isStaff ? '#f0f7ff' : isVisitor ? '#f0fff4' : 'transparent'
-                                        }}
-                                    >
-                                        {columns.map((col, colIdx) => (
-                                            <td key={colIdx} style={{ padding: '1rem 1.5rem', fontSize: '0.875rem' }}>
-                                                {col.key === 'status'
-                                                    ? getStatusBadge(row[col.key])
-                                                    : col.key === 'method'
-                                                        ? getMethodBadge(row[col.key])
-                                                        : row[col.key]}
-                                            </td>
-                                        ))}
-                                        <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
-                                            <button style={{ backgroundColor: 'transparent', color: 'var(--text-muted)' }}>
-                                                <MoreVertical size={16} />
-                                            </button>
+                            data.map((row, rowIdx) => (
+                                <tr key={rowIdx} className="table-row" style={{
+                                    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                                    transition: 'var(--transition)'
+                                }}>
+                                    {columns.map((col, colIdx) => (
+                                        <td key={colIdx} style={{
+                                            padding: '1rem 1.75rem',
+                                            fontSize: '0.875rem',
+                                            color: 'var(--text-secondary)',
+                                            fontWeight: 500
+                                        }}>
+                                            {col.key === 'status' ? getStatusBadge(row[col.key]) :
+                                                col.key === 'method' ? getMethodBadge(row[col.key]) :
+                                                    col.render ? col.render(row[col.key], row) : (row[col.key] || '-')}
                                         </td>
-                                    </tr>
-                                );
-                            })
+                                    ))}
+                                </tr>
+                            ))
                         )}
                     </tbody>
                 </table>

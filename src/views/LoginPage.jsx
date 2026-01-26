@@ -1,98 +1,468 @@
-import React, { useState } from 'react';
-import { ShieldCheck, Lock, User, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { ShieldCheck, Lock, User, ArrowLeft, X, Key } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { createPortal } from 'react-dom';
+import { logAudit } from '../lib/audit';
 
 const LoginPage = ({ onLogin, onBack }) => {
-    const [role, setRole] = useState('Security Officer');
+    const { t } = useTranslation();
+    const [users, setUsers] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selectedUser, setSelectedUser] = useState(null);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [showForgotPassword, setShowForgotPassword] = useState(false);
+    const [resetEmail, setResetEmail] = useState('');
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [resetting, setResetting] = useState(false);
 
-    const handleSubmit = (e) => {
+    // Default password mapping (for demo purposes - in production, use proper password hashing)
+    const defaultPasswords = {
+        'admin@lyceumglobal.co': 'Admin@1234',
+        'so@lyceumglobal.co': 'So@1234',
+        'hodso@lyceumglobal.co': 'Hod@1234',
+        'sclmgt@lyceumglobal.co': 'Mgt@1234',
+        'sclops@lyceumglobal.co': 'Ops@1234'
+    };
+
+    useEffect(() => {
+        fetchUsers();
+    }, []);
+
+    const fetchUsers = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('users')
+                .select('*')
+                .eq('is_active', true)
+                .order('role', { ascending: true });
+
+            if (error) throw error;
+
+            setUsers(data || []);
+            if (data && data.length > 0) {
+                const firstUser = data[0];
+                setSelectedUser(firstUser);
+                setUsername(firstUser.email);
+                setPassword(defaultPasswords[firstUser.email] || '');
+            }
+        } catch (err) {
+            console.error('Error fetching users:', err);
+            alert('Error loading users. Please refresh the page.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUserChange = (email) => {
+        const user = users.find(u => u.email === email);
+        if (user) {
+            setSelectedUser(user);
+            setUsername(user.email);
+            setPassword(defaultPasswords[user.email] || '');
+        }
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Simple mock login
-        if (username && password) {
-            onLogin({ username, role });
-        } else {
+
+        if (!username || !password) {
             alert('Please enter credentials');
+            return;
+        }
+
+        if (!selectedUser) {
+            alert('Please select a user');
+            return;
+        }
+
+        // Verify password from database
+        try {
+            const { data: user, error } = await supabase
+                .from('users')
+                .select('password')
+                .eq('email', username)
+                .single();
+
+            if (error || !user) {
+                alert('Invalid credentials');
+                return;
+            }
+
+            // Check if password matches (in production, use proper password hashing)
+            if (user.password === password) {
+                logAudit('Login', 'users', null, username, { role: selectedUser.role, name: selectedUser.full_name });
+                onLogin({ username, role: selectedUser.role, full_name: selectedUser.full_name });
+            } else {
+                alert('Invalid credentials');
+            }
+        } catch (err) {
+            console.error('Login error:', err);
+            alert('Login failed. Please try again.');
+        }
+    };
+
+    const handleForgotPassword = async (e) => {
+        e.preventDefault();
+
+        if (!resetEmail) {
+            alert('Please enter your email address');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            alert('Passwords do not match');
+            return;
+        }
+
+        if (newPassword.length < 6) {
+            alert('Password must be at least 6 characters long');
+            return;
+        }
+
+        setResetting(true);
+        try {
+            // Verify user exists
+            const { data: user, error: userError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('email', resetEmail)
+                .single();
+
+            if (userError || !user) {
+                alert('No account found with this email address');
+                setResetting(false);
+                return;
+            }
+
+            // In a real application, you would:
+            // 1. Send a password reset email with a secure token
+            // 2. Verify the token before allowing password reset
+            // For this demo, we'll update the password directly
+
+            const { error: updateError } = await supabase
+                .from('users')
+                .update({ password: newPassword })
+                .eq('email', resetEmail);
+
+            if (updateError) {
+                throw updateError;
+            }
+
+            logAudit('Password Reset', 'users', user.id, resetEmail, { name: user.full_name });
+            alert(`Password reset successful for ${user.full_name}!\n\nYour new password has been set.\nPlease use it to login.`);
+
+            // Close modal and reset form
+            setShowForgotPassword(false);
+            setResetEmail('');
+            setNewPassword('');
+            setConfirmPassword('');
+
+        } catch (err) {
+            console.error('Error resetting password:', err);
+            alert('Error resetting password. Please try again.');
+        } finally {
+            setResetting(false);
         }
     };
 
     return (
         <div style={{
             minHeight: '100vh',
-            backgroundColor: '#f8fafc',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '2rem'
+            padding: '1rem',
+            position: 'relative',
+            overflow: 'hidden'
         }}>
-            <div className="card animate-fade-in" style={{ width: '100%', maxWidth: '400px', padding: '2.5rem' }}>
+            {/* Background Decorative Blur */}
+            <div style={{ position: 'fixed', top: '10%', left: '10%', width: '400px', height: '400px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,140,0,0.1) 0%, transparent 70%)', filter: 'blur(100px)', zIndex: -1 }}></div>
+            <div style={{ position: 'fixed', bottom: '10%', right: '10%', width: '400px', height: '400px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255,71,121,0.1) 0%, transparent 70%)', filter: 'blur(100px)', zIndex: -1 }}></div>
+
+            <div className="card animate-fade-in" style={{ width: '100%', maxWidth: '440px', padding: '2.5rem 1.5rem' }}>
                 <button
                     onClick={onBack}
                     style={{
-                        backgroundColor: 'transparent',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
                         color: 'var(--text-muted)',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.5rem',
-                        marginBottom: '2rem',
-                        padding: 0
+                        gap: '0.625rem',
+                        marginBottom: '2.5rem',
+                        padding: '0.5rem 1rem',
+                        borderRadius: '10px',
+                        border: '1px solid var(--glass-border)',
+                        fontSize: '0.8125rem',
+                        fontWeight: 600
                     }}
                 >
-                    <ArrowLeft size={18} /> Back to Landing
+                    <ArrowLeft size={16} /> {t('login.return')}
                 </button>
 
-                <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                    <img src="/logo.png" alt="NGS Logo" style={{ width: '80px', height: 'auto', marginBottom: '1rem' }} />
-                    <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>System Login</h2>
-                    <p style={{ color: 'var(--text-muted)' }}>Security Personnel & Management</p>
+                <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+                    <div style={{ display: 'inline-flex', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '24px', marginBottom: '1.5rem', border: '1px solid var(--glass-border)' }}>
+                        <img src="/logo.png" alt="NGS Logo" style={{ width: '60px', height: 'auto' }} />
+                    </div>
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>{t('login.title')}</h2>
+                    <p style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{t('login.subtitle')}</p>
                 </div>
 
                 <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '1.5rem' }}>
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>Target Role</label>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('login.user_account')}</label>
                         <select
-                            value={role}
-                            onChange={(e) => setRole(e.target.value)}
-                            style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: '1px solid var(--border)', backgroundColor: 'white' }}
+                            value={username}
+                            onChange={(e) => handleUserChange(e.target.value)}
+                            disabled={loading}
+                            style={{
+                                width: '100%',
+                                padding: '1rem',
+                                borderRadius: '14px',
+                                border: '1px solid var(--glass-border)',
+                                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                                color: '#fff',
+                                fontWeight: 600,
+                                outline: 'none'
+                            }}
                         >
-                            <option>Security Officer</option>
-                            <option>Admin / Management</option>
+                            {loading ? (
+                                <option style={{ backgroundColor: '#1a1d21' }}>{t('login.loading_users')}</option>
+                            ) : users.length === 0 ? (
+                                <option style={{ backgroundColor: '#1a1d21' }}>{t('login.no_users')}</option>
+                            ) : (
+                                users.map(user => (
+                                    <option key={user.id} value={user.email} style={{ backgroundColor: '#1a1d21' }}>
+                                        {user.role === 'Security Officer'
+                                            ? `${user.full_name} (${user.role})`
+                                            : user.full_name}
+                                    </option>
+                                ))
+                            )}
                         </select>
                     </div>
 
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>Username</label>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>User Identifier</label>
                         <div style={{ position: 'relative' }}>
-                            <User size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                            <User size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                placeholder="Enter username"
-                                style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2.5rem', borderRadius: '10px', border: '1px solid var(--border)' }}
+                                placeholder="Employee ID or Username"
+                                style={{
+                                    width: '100%',
+                                    padding: '1rem 1rem 1rem 3rem',
+                                    borderRadius: '14px',
+                                    border: '1px solid var(--glass-border)',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                                    color: '#fff',
+                                    fontWeight: 600,
+                                    outline: 'none'
+                                }}
                             />
                         </div>
                     </div>
 
                     <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>Password</label>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Security Key</label>
                         <div style={{ position: 'relative' }}>
-                            <Lock size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                            <Lock size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                             <input
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="••••••••"
-                                style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2.5rem', borderRadius: '10px', border: '1px solid var(--border)' }}
+                                style={{
+                                    width: '100%',
+                                    padding: '1rem 1rem 1rem 3rem',
+                                    borderRadius: '14px',
+                                    border: '1px solid var(--glass-border)',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                                    color: '#fff',
+                                    fontWeight: 600,
+                                    outline: 'none'
+                                }}
                             />
                         </div>
                     </div>
 
                     <button type="submit" className="btn-primary" style={{ padding: '1rem', justifyContent: 'center', fontSize: '1rem' }}>
-                        Sign In
+                        {t('login.sign_in')}
                     </button>
+
+                    <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+                        <button
+                            type="button"
+                            onClick={() => setShowForgotPassword(true)}
+                            style={{
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                color: 'var(--primary)',
+                                fontSize: '0.875rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                textDecoration: 'underline'
+                            }}
+                        >
+                            {t('login.forgot_password')}
+                        </button>
+                    </div>
                 </form>
             </div>
+
+            {/* Forgot Password Modal */}
+            {showForgotPassword && createPortal(
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    backdropFilter: 'blur(10px)'
+                }}>
+                    <div className="card animate-fade-in-static" style={{ maxWidth: '450px', width: '90%', padding: '2.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                            <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>Reset Password</h3>
+                            <button
+                                onClick={() => {
+                                    setShowForgotPassword(false);
+                                    setResetEmail('');
+                                    setNewPassword('');
+                                    setConfirmPassword('');
+                                }}
+                                style={{ backgroundColor: 'rgba(255,255,255,0.05)', padding: '0.5rem', borderRadius: '8px', border: 'none', cursor: 'pointer' }}
+                            >
+                                <X size={20} color="var(--text-muted)" />
+                            </button>
+                        </div>
+
+                        <p style={{ color: 'var(--text-muted)', marginBottom: '2rem', fontSize: '0.875rem' }}>
+                            Enter your email address and a new password to reset your account.
+                        </p>
+
+                        <form onSubmit={handleForgotPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                                    Email Address
+                                </label>
+                                <input
+                                    type="email"
+                                    required
+                                    value={resetEmail}
+                                    onChange={(e) => setResetEmail(e.target.value)}
+                                    placeholder="your.email@example.com"
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        borderRadius: '12px',
+                                        border: '1px solid var(--glass-border)',
+                                        backgroundColor: 'rgba(255,255,255,0.03)',
+                                        color: 'var(--text-main)',
+                                        outline: 'none'
+                                    }}
+                                />
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                                    New Password
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <Key size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                                    <input
+                                        type="password"
+                                        required
+                                        value={newPassword}
+                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        placeholder="Enter new password"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem 0.75rem 0.75rem 2.75rem',
+                                            borderRadius: '12px',
+                                            border: '1px solid var(--glass-border)',
+                                            backgroundColor: 'rgba(255,255,255,0.03)',
+                                            color: 'var(--text-main)',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                                    Confirm New Password
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <Key size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                                    <input
+                                        type="password"
+                                        required
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        placeholder="Confirm new password"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem 0.75rem 0.75rem 2.75rem',
+                                            borderRadius: '12px',
+                                            border: '1px solid var(--glass-border)',
+                                            backgroundColor: 'rgba(255,255,255,0.03)',
+                                            color: 'var(--text-main)',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowForgotPassword(false);
+                                        setResetEmail('');
+                                        setNewPassword('');
+                                        setConfirmPassword('');
+                                    }}
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.875rem',
+                                        backgroundColor: 'rgba(255,255,255,0.05)',
+                                        border: '1px solid var(--glass-border)',
+                                        borderRadius: '12px',
+                                        color: 'var(--text-main)',
+                                        fontWeight: 600,
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={resetting}
+                                    className="btn-primary"
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.875rem',
+                                        borderRadius: '12px',
+                                        fontWeight: 700
+                                    }}
+                                >
+                                    {resetting ? 'Resetting...' : 'Reset Password'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>,
+                document.body
+            )}
         </div>
     );
 };

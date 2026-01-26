@@ -1,105 +1,224 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import DashboardView from './views/DashboardView';
-import EntryManagementView from './views/EntryManagementView';
-import VisitorsView from './views/VisitorsView';
 import VehiclesView from './views/VehiclesView';
 import ReportsView from './views/ReportsView';
-import LandingPage from './views/LandingPage';
+import ScheduledMeetingsView from './views/ScheduledMeetingsView';
+import UserManagementView from './views/UserManagementView';
+import VisitorTypeSelection from './views/VisitorTypeSelection';
 import LoginPage from './views/LoginPage';
+import VisitorSelfCheckIn from './components/VisitorSelfCheckIn';
+import VisitorCheckOut from './components/VisitorCheckOut';
+import SettingsView from './views/SettingsView';
+import ExternalApprovalView from './views/ExternalApprovalView';
 import { ArrowLeft } from 'lucide-react';
+import { AlertProvider } from './context/AlertContext';
+import { logAudit } from './lib/audit';
+import { syncTranslations } from './lib/translationSync';
 import './App.css';
 
-function App() {
-  const [view, setView] = useState('landing'); // landing, login, app
+function AppContent() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    // Sync translations from DB (non-blocking)
+    syncTranslations().catch(err => {
+      console.warn('Translation sync failed, using local translations:', err);
+    });
+  }, []);
+
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('ngs_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [user, setUser] = useState(null);
-  const [publicMode, setPublicMode] = useState(false);
+  const [theme, setTheme] = useState('dark');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+      if (window.innerWidth > 768) setSidebarOpen(false);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  useEffect(() => {
+    // Sync activeTab with URL if possible, or just keep it simple for now
+    const path = location.pathname.substring(1);
+    if (path && ['dashboard', 'scheduled-meetings', 'visitors', 'vehicles', 'reports', 'user-management'].includes(path)) {
+      setActiveTab(path);
+    }
+  }, [location]);
+
+  useEffect(() => {
+    // Load Google API and Identity Services scripts
+    const loadScript = (src) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    };
+
+    loadScript('https://apis.google.com/js/api.js');
+    loadScript('https://accounts.google.com/gsi/client');
+  }, []);
 
   const handleLogin = (userData) => {
-    setUser(userData);
-    setView('app');
-    setActiveTab('dashboard');
-    setPublicMode(false);
-  };
+    const userRole = userData.role || 'Security Officer';
+    const finalUser = { ...userData, role: userRole };
+    setUser(finalUser);
+    localStorage.setItem('ngs_user', JSON.stringify(finalUser));
 
-  const handlePublicAccess = (targetView) => {
-    setActiveTab(targetView);
-    setView('app');
-    setPublicMode(true);
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setView('landing');
-  };
-
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return <DashboardView />;
-      case 'entry-management':
-        return <EntryManagementView />;
-      case 'visitors':
-        return <VisitorsView />;
-      case 'vehicles':
-        return <VehiclesView />;
-      case 'reports':
-        return <ReportsView />;
-      default:
-        return <DashboardView />;
+    if (userRole === 'Security Officer') {
+      navigate('/dashboard');
+    } else if (userRole === 'School Management') {
+      navigate('/dashboard');
+    } else {
+      navigate('/dashboard');
     }
   };
 
-  if (view === 'landing') {
-    return <LandingPage onNavigate={handlePublicAccess} onLogin={() => setView('login')} />;
-  }
+  const handleLogout = () => {
+    if (user) {
+      logAudit('Logout', 'users', null, user.username || user.email, { name: user.full_name, role: user.role });
+    }
+    setUser(null);
+    localStorage.removeItem('ngs_user');
+    navigate('/');
+  };
 
-  if (view === 'login') {
-    return <LoginPage onLogin={handleLogin} onBack={() => setView('landing')} />;
+  const handleUpdateUser = (updatedUser) => {
+    setUser(updatedUser);
+    localStorage.setItem('ngs_user', JSON.stringify(updatedUser));
+  };
+
+  const isKioskMode = location.pathname.startsWith('/kiosk');
+  const isApprovalLink = location.pathname.startsWith('/approve');
+
+  if (!user && !isKioskMode && !isApprovalLink && location.pathname !== '/' && location.pathname !== '/login') {
+    return <Navigate to="/" replace />;
   }
 
   return (
-    <div className="app-container" style={{ display: 'flex', minHeight: '100vh' }}>
-      {!publicMode && <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} />}
-
-      <main style={{
-        flex: 1,
-        marginLeft: publicMode ? '0' : '260px',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: 'var(--background)'
-      }}>
-        {publicMode ? (
-          <header style={{
-            padding: '1.5rem 2rem',
-            backgroundColor: 'white',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <button
-              onClick={() => setView('landing')}
-              style={{ backgroundColor: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-            >
-              <ArrowLeft size={20} /> Back to Home
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <img src="/logo.png" alt="Logo" style={{ width: '32px', height: 'auto' }} />
-              <span style={{ fontWeight: 700 }}>Nextgen Shield</span>
-            </div>
-          </header>
-        ) : (
-          <Navbar activeTab={activeTab} user={user} />
+    <AlertProvider user={user}>
+      <div className="app-container" style={{ display: 'flex', minHeight: '100vh' }}>
+        {user && !isKioskMode && (
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={(tab) => {
+              navigate('/' + tab);
+              if (isMobile) setSidebarOpen(false);
+            }}
+            onLogout={handleLogout}
+            role={user?.role}
+            isOpen={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            isMobile={isMobile}
+          />
         )}
 
-        <div className="main-content" style={{ flex: 1 }}>
-          {renderContent()}
-        </div>
-      </main>
-    </div>
+        <main style={{
+          flex: 1,
+          marginLeft: (user && !isKioskMode && !isMobile) ? '280px' : '0',
+          display: 'flex',
+          flexDirection: 'column',
+          backgroundColor: 'transparent',
+          transition: 'var(--transition)',
+          width: '100%',
+          overflowX: 'hidden'
+        }}>
+          {isKioskMode ? (
+            <header style={{
+              padding: '1rem 2rem',
+              margin: '1rem',
+              backgroundColor: 'var(--glass-bg)',
+              backdropFilter: 'var(--glass-blur)',
+              WebkitBackdropFilter: 'var(--glass-blur)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              boxShadow: 'var(--shadow)'
+            }}>
+              <button
+                onClick={() => navigate('/')}
+                style={{ backgroundColor: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem', border: 'none' }}
+              >
+                <ArrowLeft size={20} /> {t('common.back_to_home', { defaultValue: 'Back to Home' })}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '0.5rem', borderRadius: '10px' }}>
+                  <img src="/logo.png" alt="Logo" style={{ width: '24px', height: 'auto' }} />
+                </div>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>Nextgen Shield</span>
+              </div>
+            </header>
+          ) : (
+            user && <Navbar
+              activeTab={activeTab}
+              user={user}
+              theme={theme}
+              toggleTheme={toggleTheme}
+              onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+              isMobile={isMobile}
+            />
+          )}
+
+          <div className="main-content" style={{
+            flex: 1,
+            padding: (user && !isKioskMode && !isMobile) ? '0 1.5rem 1.5rem 0' : '1rem'
+          }}>
+            <Routes>
+              <Route path="/" element={<VisitorTypeSelection />} />
+              <Route path="/login" element={<LoginPage onLogin={handleLogin} onBack={() => navigate('/')} />} />
+
+              {/* Protected Routes */}
+              <Route path="/dashboard" element={<DashboardView user={user} />} />
+              <Route path="/scheduled-meetings" element={<ScheduledMeetingsView />} />
+              <Route path="/vehicles" element={<VehiclesView />} />
+              <Route path="/reports" element={<ReportsView user={user} />} />
+              <Route path="/user-management" element={<UserManagementView />} />
+              <Route path="/settings" element={<SettingsView user={user} onUpdateUser={handleUpdateUser} />} />
+
+              {/* Kiosk Routes */}
+              <Route path="/kiosk/check-in" element={<VisitorSelfCheckIn />} />
+              <Route path="/kiosk/check-out" element={<VisitorCheckOut />} />
+              <Route path="/kiosk/vehicles" element={<VehiclesView />} />
+              <Route path="/approve/:token" element={<ExternalApprovalView />} />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
+      </div>
+    </AlertProvider>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
   );
 }
 
