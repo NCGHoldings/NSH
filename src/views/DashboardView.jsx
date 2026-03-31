@@ -3,7 +3,7 @@ import StatCard from '../components/StatCard';
 import LogTable from '../components/LogTable';
 import { Users, UserPlus, Car, CheckCircle, Calendar, Clock, ArrowRight, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { updateTelegramMessage, getTelegramUpdates, answerCallbackQuery, sendForceReply, editTelegramMessageMarkup, getTimeSelectorKeyboard, getMinuteSelectorKeyboard, formatApprovedMessage, formatDeniedMessage } from '../lib/telegram';
+import { updateTelegramMessage, getTelegramUpdates, answerCallbackQuery, editTelegramMessageMarkup, getTimeSelectorKeyboard, getMinuteSelectorKeyboard, formatApprovedMessage, formatDeniedMessage } from '../lib/telegram';
 import { sendSMS } from '../lib/sms';
 import { logAudit } from '../lib/audit';
 
@@ -124,6 +124,7 @@ const DashboardView = ({ user }) => {
             clearInterval(telegramInterval);
             supabase.removeChannel(pendingSubscription);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const fetchPendingApprovals = async () => {
@@ -271,14 +272,6 @@ const DashboardView = ({ user }) => {
         }
         fetchPendingApprovals();
         fetchDashboardData();
-    };
-
-    const handleSetTime = async (visitorId, chatId, messageId) => {
-        await sendForceReply(
-            chatId,
-            `🕒 Setting meeting time for visitor [${visitorId}]\n\nPlease reply to this message with the duration (e.g. 10:00 AM - 11:30 AM)`,
-            messageId
-        );
     };
 
     const handleTelegramReply = async (originalMessageId, replyText, telegramUserId, promptText = '') => {

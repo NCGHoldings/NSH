@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { User, Lock, Save, ShieldCheck, UserCircle } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 
 const SettingsView = ({ user, onUpdateUser }) => {
     const [formData, setFormData] = useState({
@@ -33,7 +32,7 @@ const SettingsView = ({ user, onUpdateUser }) => {
 
             setMessage({ type: 'success', text: 'Profile updated successfully!' });
             setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
-        } catch (err) {
+        } catch {
             setMessage({ type: 'error', text: 'Failed to update profile. Please try again.' });
         } finally {
             setLoading(false);

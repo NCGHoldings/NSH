@@ -37,6 +37,7 @@ const VehiclesView = () => {
             .from('vehicle_entries')
             .select('*')
             .order('entry_time', { ascending: false });
+        if (error) console.error("Error fetching entries:", error);
         if (data) setEntries(data);
     };
 

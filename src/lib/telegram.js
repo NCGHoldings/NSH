@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 export const escapeHTML = (str) => {
     if (!str) return '';
     return str.toString().replace(/[&<>"']/g, m => ({
@@ -13,7 +15,7 @@ export const sendTelegramNotification = async (visitorNames, purpose, meetingWit
     console.log('--- sendTelegramNotification ---');
     console.log('isExternal:', isExternal);
     console.log('source:', source);
-    const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
+    // VITE_TELEGRAM_BOT_TOKEN removed for security. Handled by Edge Function.
     const chatId = import.meta.env.VITE_TELEGRAM_CHAT_ID;
     const envAppUrl = import.meta.env.VITE_APP_URL;
     const currentUrl = window.location.origin;
@@ -22,8 +24,8 @@ export const sendTelegramNotification = async (visitorNames, purpose, meetingWit
     const isLocalhost = appUrl.includes('localhost') || appUrl.includes('127.0.0.1');
 
     // Check if configuration exists
-    if (!token || !chatId || token === 'your_token_here' || chatId === 'your_chat_id_here') {
-        console.warn('Telegram Notification Skipped: Missing VITE_TELEGRAM_BOT_TOKEN or VITE_TELEGRAM_CHAT_ID in .env');
+    if (!chatId || chatId === 'your_chat_id_here') {
+        console.warn('Telegram Notification Skipped: Missing VITE_TELEGRAM_CHAT_ID in .env');
         return null;
     }
 
@@ -57,22 +59,21 @@ ${isLocalhost ? `🔗 <b>Approval Link:</b>\n<code>${fullApproveUrl}</code>\n\n<
     const keyboard = { inline_keyboard };
 
     try {
-        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: message,
-                parse_mode: 'HTML',
-                reply_markup: keyboard
-            })
+        const { data, error } = await supabase.functions.invoke('telegram-notify', {
+            body: {
+                action: 'sendMessage',
+                payload: {
+                    chat_id: chatId,
+                    text: message,
+                    parse_mode: 'HTML',
+                    reply_markup: keyboard
+                }
+            }
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            console.error('Failed to send Telegram message:', data);
-            alert(`Telegram Error [${response.status}]: ${data.description || 'Unknown error'}`);
+        if (error || !data?.ok) {
+            console.error('Failed to send Telegram message:', data || error);
+            // alert(`Telegram Error: ${data?.description || 'Unknown error'}`);
             return null;
         } else {
             console.log('Telegram notification sent successfully.');
@@ -89,26 +90,22 @@ ${isLocalhost ? `🔗 <b>Approval Link:</b>\n<code>${fullApproveUrl}</code>\n\n<
 };
 
 export const updateTelegramMessage = async (chatId, messageId, newText) => {
-    const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
-
-    if (!token) return;
-
     try {
-        const response = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                message_id: messageId,
-                text: newText,
-                parse_mode: 'HTML',
-                reply_markup: { inline_keyboard: [] } // Explicitly remove buttons
-            })
+        const { data, error } = await supabase.functions.invoke('telegram-notify', {
+            body: {
+                action: 'editMessageText',
+                payload: {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    text: newText,
+                    parse_mode: 'HTML',
+                    reply_markup: { inline_keyboard: [] } // Explicitly remove buttons
+                }
+            }
         });
 
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to update Telegram message:', data);
+        if (error || !data?.ok) {
+            console.error('Failed to update Telegram message:', data || error);
         } else {
             console.log('Telegram message updated successfully.');
         }
@@ -118,23 +115,20 @@ export const updateTelegramMessage = async (chatId, messageId, newText) => {
 };
 
 export const editTelegramMessageMarkup = async (chatId, messageId, keyboard) => {
-    const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
-    if (!token) return;
-
     try {
-        const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                message_id: messageId,
-                reply_markup: keyboard
-            })
+        const { data, error } = await supabase.functions.invoke('telegram-notify', {
+            body: {
+                action: 'editMessageReplyMarkup',
+                payload: {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: keyboard
+                }
+            }
         });
 
-        if (!response.ok) {
-            const data = await response.json();
-            console.error('Failed to edit Telegram markup:', data);
+        if (error || !data?.ok) {
+            console.error('Failed to edit Telegram markup:', data || error);
         }
     } catch (error) {
         console.error('Error editing Telegram markup:', error);
@@ -174,17 +168,15 @@ export const getMinuteSelectorKeyboard = (visitorId, step, hour) => {
 };
 
 export const answerCallbackQuery = async (callbackQueryId, text = null) => {
-    const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
-    if (!token) return;
-
     try {
         const payload = { callback_query_id: callbackQueryId };
         if (text) payload.text = text;
 
-        await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+        await supabase.functions.invoke('telegram-notify', {
+            body: {
+                action: 'answerCallbackQuery',
+                payload: payload
+            }
         });
     } catch (error) {
         console.error("Error answering callback query:", error);
@@ -243,22 +235,20 @@ export const getTelegramUpdates = async (offset = null) => {
 };
 
 export const sendForceReply = async (chatId, text, replyToMessageId) => {
-    const token = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
-    if (!token) return;
-
     try {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                reply_to_message_id: replyToMessageId,
-                reply_markup: {
-                    force_reply: true,
-                    selective: true
+        await supabase.functions.invoke('telegram-notify', {
+            body: {
+                action: 'sendMessage',
+                payload: {
+                    chat_id: chatId,
+                    text: text,
+                    reply_to_message_id: replyToMessageId,
+                    reply_markup: {
+                        force_reply: true,
+                        selective: true
+                    }
                 }
-            })
+            }
         });
     } catch (error) {
         console.error("Error sending force reply:", error);

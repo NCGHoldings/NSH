@@ -4,6 +4,7 @@ import { ShieldCheck, Lock, User, ArrowLeft, X, Key } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createPortal } from 'react-dom';
 import { logAudit } from '../lib/audit';
+import bcrypt from 'bcryptjs';
 
 const LoginPage = ({ onLogin, onBack }) => {
     const { t } = useTranslation();
@@ -82,7 +83,7 @@ const LoginPage = ({ onLogin, onBack }) => {
         try {
             const { data: user, error } = await supabase
                 .from('users')
-                .select('password')
+                .select('*')
                 .eq('email', username)
                 .single();
 
@@ -91,13 +92,16 @@ const LoginPage = ({ onLogin, onBack }) => {
                 return;
             }
 
-            // Check if password matches (in production, use proper password hashing)
-            if (user.password === password) {
-                logAudit('Login', 'users', null, username, { role: selectedUser.role, name: selectedUser.full_name });
-                onLogin({ username, role: selectedUser.role, full_name: selectedUser.full_name });
-            } else {
+            const isValid = bcrypt.compareSync(password, user.password);
+
+            if (!isValid) {
                 alert('Invalid credentials');
+                return;
             }
+
+            logAudit('Login', 'users', user.id, user.email, { role: user.role, name: user.full_name });
+            onLogin({ username: user.email, role: user.role, full_name: user.full_name });
+            
         } catch (err) {
             console.error('Login error:', err);
             alert('Login failed. Please try again.');
@@ -137,18 +141,16 @@ const LoginPage = ({ onLogin, onBack }) => {
                 return;
             }
 
-            // In a real application, you would:
-            // 1. Send a password reset email with a secure token
-            // 2. Verify the token before allowing password reset
-            // For this demo, we'll update the password directly
+            // For this demo, we'll update the password securely via RPC
 
-            const { error: updateError } = await supabase
-                .from('users')
-                .update({ password: newPassword })
-                .eq('email', resetEmail);
+            const salt = bcrypt.genSaltSync(10);
+            const hashedPassword = bcrypt.hashSync(newPassword, salt);
 
-            if (updateError) {
-                throw updateError;
+            const { data: success, error: updateError } = await supabase
+                .rpc('reset_password', { p_email: resetEmail, p_new_password: hashedPassword });
+
+            if (updateError || !success) {
+                throw updateError || new Error('Reset failed');
             }
 
             logAudit('Password Reset', 'users', user.id, resetEmail, { name: user.full_name });

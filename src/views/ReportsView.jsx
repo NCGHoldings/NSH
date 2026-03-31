@@ -37,20 +37,6 @@ ChartJS.register(
 );
 
 const ReportsView = ({ user }) => {
-    // Access Control
-    const allowedRoles = ['Admin', 'Security HOD', 'School Management'];
-    if (!allowedRoles.includes(user?.role)) {
-        return (
-            <div style={{ padding: '4rem', textAlign: 'center' }}>
-                <div className="card" style={{ maxWidth: '500px', margin: '0 auto', padding: '3rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                    <XCircle size={48} color="#ef4444" style={{ marginBottom: '1.5rem' }} />
-                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '1rem' }}>Access Denied</h2>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '1.125rem' }}>Your current security clearance does not permit access to advanced analytics.</p>
-                </div>
-            </div>
-        );
-    }
-
     // State
     const [isMobileHeader, setIsMobileHeader] = useState(window.innerWidth <= 1024);
     const [activeTab, setActiveTab] = useState('Overview');
@@ -188,6 +174,20 @@ const ReportsView = ({ user }) => {
             y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
         }
     };
+
+    // Access Control Check
+    const allowedRoles = ['Admin', 'Security HOD', 'School Management'];
+    if (!allowedRoles.includes(user?.role)) {
+        return (
+            <div style={{ padding: '4rem', textAlign: 'center' }}>
+                <div className="card" style={{ maxWidth: '500px', margin: '0 auto', padding: '3rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                    <XCircle size={48} color="#ef4444" style={{ marginBottom: '1.5rem' }} />
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '1rem' }}>Access Denied</h2>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '1.125rem' }}>Your current security clearance does not permit access to advanced analytics.</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="animate-fade-in" style={{ padding: '1rem 0' }}>
