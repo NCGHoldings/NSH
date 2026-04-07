@@ -4,7 +4,7 @@ import { ShieldCheck, Lock, User, ArrowLeft, X, Key } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { createPortal } from 'react-dom';
 import { logAudit } from '../lib/audit';
-import bcrypt from 'bcryptjs';
+import { verifyPassword, hashPassword, validatePasswordStrength } from '../utils/passwordUtils';
 
 const LoginPage = ({ onLogin, onBack }) => {
     const { t } = useTranslation();
@@ -18,15 +18,7 @@ const LoginPage = ({ onLogin, onBack }) => {
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [resetting, setResetting] = useState(false);
-
-    // Default password mapping (for demo purposes - in production, use proper password hashing)
-    const defaultPasswords = {
-        'admin@lyceumglobal.co': 'Admin@1234',
-        'so@lyceumglobal.co': 'So@1234',
-        'hodso@lyceumglobal.co': 'Hod@1234',
-        'sclmgt@lyceumglobal.co': 'Mgt@1234',
-        'sclops@lyceumglobal.co': 'Ops@1234'
-    };
+    const [passwordErrors, setPasswordErrors] = useState([]);
 
     useEffect(() => {
         fetchUsers();
@@ -36,7 +28,7 @@ const LoginPage = ({ onLogin, onBack }) => {
         try {
             const { data, error } = await supabase
                 .from('users')
-                .select('*')
+                .select('id, email, full_name, role, is_active')
                 .eq('is_active', true)
                 .order('role', { ascending: true });
 
@@ -47,10 +39,9 @@ const LoginPage = ({ onLogin, onBack }) => {
                 const firstUser = data[0];
                 setSelectedUser(firstUser);
                 setUsername(firstUser.email);
-                setPassword(defaultPasswords[firstUser.email] || '');
             }
         } catch (err) {
-            console.error('Error fetching users:', err);
+            if (import.meta.env.DEV) console.error('Error fetching users:', err);
             alert('Error loading users. Please refresh the page.');
         } finally {
             setLoading(false);
@@ -62,7 +53,7 @@ const LoginPage = ({ onLogin, onBack }) => {
         if (user) {
             setSelectedUser(user);
             setUsername(user.email);
-            setPassword(defaultPasswords[user.email] || '');
+            setPassword('');
         }
     };
 
@@ -79,11 +70,11 @@ const LoginPage = ({ onLogin, onBack }) => {
             return;
         }
 
-        // Verify password from database
+        // Verify password from database using bcrypt
         try {
             const { data: user, error } = await supabase
                 .from('users')
-                .select('*')
+                .select('password')
                 .eq('email', username)
                 .single();
 
@@ -92,24 +83,22 @@ const LoginPage = ({ onLogin, onBack }) => {
                 return;
             }
 
-            const isValid = bcrypt.compareSync(password, user.password);
-
-            if (!isValid) {
+            const isValid = await verifyPassword(password, user.password);
+            if (isValid) {
+                logAudit('Login', 'users', null, username, { role: selectedUser.role, name: selectedUser.full_name });
+                onLogin({ id: selectedUser.id, username, role: selectedUser.role, full_name: selectedUser.full_name });
+            } else {
                 alert('Invalid credentials');
-                return;
             }
-
-            logAudit('Login', 'users', user.id, user.email, { role: user.role, name: user.full_name });
-            onLogin({ username: user.email, role: user.role, full_name: user.full_name });
-            
         } catch (err) {
-            console.error('Login error:', err);
+            if (import.meta.env.DEV) console.error('Login error:', err);
             alert('Login failed. Please try again.');
         }
     };
 
     const handleForgotPassword = async (e) => {
         e.preventDefault();
+        setPasswordErrors([]);
 
         if (!resetEmail) {
             alert('Please enter your email address');
@@ -121,8 +110,10 @@ const LoginPage = ({ onLogin, onBack }) => {
             return;
         }
 
-        if (newPassword.length < 6) {
-            alert('Password must be at least 6 characters long');
+        // Validate password strength
+        const { valid, errors } = validatePasswordStrength(newPassword);
+        if (!valid) {
+            setPasswordErrors(errors);
             return;
         }
 
@@ -131,7 +122,7 @@ const LoginPage = ({ onLogin, onBack }) => {
             // Verify user exists
             const { data: user, error: userError } = await supabase
                 .from('users')
-                .select('*')
+                .select('id, full_name, email')
                 .eq('email', resetEmail)
                 .single();
 
@@ -141,16 +132,16 @@ const LoginPage = ({ onLogin, onBack }) => {
                 return;
             }
 
-            // For this demo, we'll update the password securely via RPC
+            // Hash the new password before storing
+            const hashedPassword = await hashPassword(newPassword);
 
-            const salt = bcrypt.genSaltSync(10);
-            const hashedPassword = bcrypt.hashSync(newPassword, salt);
+            const { error: updateError } = await supabase
+                .from('users')
+                .update({ password: hashedPassword })
+                .eq('email', resetEmail);
 
-            const { data: success, error: updateError } = await supabase
-                .rpc('reset_password', { p_email: resetEmail, p_new_password: hashedPassword });
-
-            if (updateError || !success) {
-                throw updateError || new Error('Reset failed');
+            if (updateError) {
+                throw updateError;
             }
 
             logAudit('Password Reset', 'users', user.id, resetEmail, { name: user.full_name });
@@ -161,9 +152,10 @@ const LoginPage = ({ onLogin, onBack }) => {
             setResetEmail('');
             setNewPassword('');
             setConfirmPassword('');
+            setPasswordErrors([]);
 
         } catch (err) {
-            console.error('Error resetting password:', err);
+            if (import.meta.env.DEV) console.error('Error resetting password:', err);
             alert('Error resetting password. Please try again.');
         } finally {
             setResetting(false);
@@ -208,7 +200,7 @@ const LoginPage = ({ onLogin, onBack }) => {
                     <div style={{ display: 'inline-flex', padding: '1rem', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '24px', marginBottom: '1.5rem', border: '1px solid var(--glass-border)' }}>
                         <img src="/logo.png" alt="NGS Logo" style={{ width: '60px', height: 'auto' }} />
                     </div>
-                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#fff', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>{t('login.title')}</h2>
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>{t('login.title')}</h2>
                     <p style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{t('login.subtitle')}</p>
                 </div>
 
@@ -224,19 +216,19 @@ const LoginPage = ({ onLogin, onBack }) => {
                                 padding: '1rem',
                                 borderRadius: '14px',
                                 border: '1px solid var(--glass-border)',
-                                backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                                color: '#fff',
+                                backgroundColor: 'var(--glass-bg)',
+                                color: 'var(--text-main)',
                                 fontWeight: 600,
                                 outline: 'none'
                             }}
                         >
                             {loading ? (
-                                <option style={{ backgroundColor: '#1a1d21' }}>{t('kiosk.loading_users')}</option>
+                                <option style={{ backgroundColor: 'var(--background)' }}>{t('kiosk.loading_users')}</option>
                             ) : users.length === 0 ? (
-                                <option style={{ backgroundColor: '#1a1d21' }}>{t('kiosk.no_users')}</option>
+                                <option style={{ backgroundColor: 'var(--background)' }}>{t('kiosk.no_users')}</option>
                             ) : (
                                 users.map(user => (
-                                    <option key={user.id} value={user.email} style={{ backgroundColor: '#1a1d21' }}>
+                                    <option key={user.id} value={user.email} style={{ backgroundColor: 'var(--background)', color: 'var(--text-main)' }}>
                                         {user.full_name} ({t(`roles.${user.role.toLowerCase().replace(/ /g, '_')}`)})
                                     </option>
                                 ))
@@ -258,8 +250,8 @@ const LoginPage = ({ onLogin, onBack }) => {
                                     padding: '1rem 1rem 1rem 3rem',
                                     borderRadius: '14px',
                                     border: '1px solid var(--glass-border)',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                                    color: '#fff',
+                                    backgroundColor: 'var(--glass-bg)',
+                                    color: 'var(--text-main)',
                                     fontWeight: 600,
                                     outline: 'none'
                                 }}
@@ -281,8 +273,8 @@ const LoginPage = ({ onLogin, onBack }) => {
                                     padding: '1rem 1rem 1rem 3rem',
                                     borderRadius: '14px',
                                     border: '1px solid var(--glass-border)',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                                    color: '#fff',
+                                    backgroundColor: 'var(--glass-bg)',
+                                    color: 'var(--text-main)',
                                     fontWeight: 600,
                                     outline: 'none'
                                 }}
@@ -420,6 +412,13 @@ const LoginPage = ({ onLogin, onBack }) => {
                                         }}
                                     />
                                 </div>
+                                {passwordErrors.length > 0 && (
+                                    <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: '10px', fontSize: '0.75rem', color: '#ef4444' }}>
+                                        <ul style={{ listStyle: 'none', padding: 0 }}>
+                                            {passwordErrors.map((err, i) => <li key={i}>• {err}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
                             </div>
 
                             <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>

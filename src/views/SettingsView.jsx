@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Lock, Save, ShieldCheck, UserCircle } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { verifyPassword, hashPassword, validatePasswordStrength } from '../utils/passwordUtils';
 
 const SettingsView = ({ user, onUpdateUser }) => {
     const [formData, setFormData] = useState({
@@ -10,10 +12,29 @@ const SettingsView = ({ user, onUpdateUser }) => {
     });
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
+    const [passwordErrors, setPasswordErrors] = useState([]);
+
+    // Fallback: If the session doesn't have an ID (e.g. from an old login), fetch it
+    useEffect(() => {
+        if (user && !user.id) {
+            const fetchId = async () => {
+                const { data, error } = await supabase
+                    .from('users')
+                    .select('id')
+                    .eq('email', user.username || user.email)
+                    .single();
+                if (data && !error) {
+                    onUpdateUser({ ...user, id: data.id });
+                }
+            };
+            fetchId();
+        }
+    }, [user, onUpdateUser]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setMessage({ type: '', text: '' });
+        setPasswordErrors([]);
 
         if (formData.newPassword && formData.newPassword !== formData.confirmPassword) {
             setMessage({ type: 'error', text: 'New passwords do not match' });
@@ -21,19 +42,64 @@ const SettingsView = ({ user, onUpdateUser }) => {
         }
 
         setLoading(true);
-        // Simulate API call/Update logic
         try {
-            // In a real app, we would call Supabase auth update here
-            // For now, we update the local user state and show success
-            await new Promise(resolve => setTimeout(resolve, 800));
+            // If changing password, verify current and hash new
+            if (formData.newPassword) {
+                // Validate strength
+                const { valid, errors } = validatePasswordStrength(formData.newPassword);
+                if (!valid) {
+                    setPasswordErrors(errors);
+                    setLoading(false);
+                    return;
+                }
+
+                // Verify current password
+                const { data: userData, error: fetchError } = await supabase
+                    .from('users')
+                    .select('password')
+                    .eq('id', user.id)
+                    .single();
+
+                if (fetchError || !userData) {
+                    setMessage({ type: 'error', text: 'Could not verify current password.' });
+                    setLoading(false);
+                    return;
+                }
+
+                const isCurrentValid = await verifyPassword(formData.currentPassword, userData.password);
+                if (!isCurrentValid) {
+                    setMessage({ type: 'error', text: 'Current password is incorrect.' });
+                    setLoading(false);
+                    return;
+                }
+
+                // Hash and save new password
+                const hashedNew = await hashPassword(formData.newPassword);
+                const { error: updateError } = await supabase
+                    .from('users')
+                    .update({ password: hashedNew })
+                    .eq('id', user.id);
+
+                if (updateError) throw updateError;
+            }
+
+            // Also update other profile info in the database (email/username field)
+            const { error: profileError } = await supabase
+                .from('users')
+                .update({ email: formData.username })
+                .eq('id', user.id);
+
+            if (profileError) throw profileError;
 
             const updatedUser = { ...user, username: formData.username };
             onUpdateUser(updatedUser);
 
             setMessage({ type: 'success', text: 'Profile updated successfully!' });
             setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
-        } catch {
-            setMessage({ type: 'error', text: 'Failed to update profile. Please try again.' });
+            setPasswordErrors([]);
+        } catch (err) {
+            console.error('Settings update error:', err);
+            setMessage({ type: 'error', text: `Failed to update profile: ${err.message || 'Please try again.'}` });
         } finally {
             setLoading(false);
         }
@@ -182,6 +248,11 @@ const SettingsView = ({ user, onUpdateUser }) => {
                             textAlign: 'center'
                         }}>
                             {message.text}
+                            {passwordErrors.length > 0 && (
+                                <ul style={{ marginTop: '0.5rem', textAlign: 'left', listStyle: 'none', padding: 0 }}>
+                                    {passwordErrors.map((err, i) => <li key={i}>• {err}</li>)}
+                                </ul>
+                            )}
                         </div>
                     )}
 

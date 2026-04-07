@@ -2,14 +2,14 @@ import React from 'react';
 import { Download, FileText } from 'lucide-react';
 import { exportToPDF } from '../utils/pdfExport';
 
-const ReportTable = ({ title, description, data, columns, metadata = {} }) => {
+const ReportTable = ({ title, description, data, columns, _onExport }) /* eslint-disable-line no-unused-vars */ => {
     const handlePDFExport = () => {
         exportToPDF({
             title: title,
             data: data,
             columns: columns,
             filename: `${title.replace(/\s+/g, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}`,
-            metadata: metadata
+            metadata: { generatedBy: 'System Report' }
         });
     };
 

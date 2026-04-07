@@ -1,19 +1,43 @@
-import React from 'react';
-import { MoreVertical, CheckCircle, Clock, XCircle, Download } from 'lucide-react';
+import { MoreVertical, CheckCircle, Clock, XCircle, Download, FileSpreadsheet } from 'lucide-react';
 import { exportToPDF } from '../utils/pdfExport';
+import { exportToExcel } from '../utils/excelExport';
 
-const LogTable = ({ title, data, columns, metadata = {} }) => {
+const LogTable = ({ title, data, columns, period }) => {
     const handleExport = async () => {
+        // Exclude 'actions' column from PDF report as requested
+        const exportColumns = columns.filter(col => col.key !== 'actions');
+        
         await exportToPDF({
             title: title,
             data: data,
-            columns: columns,
+            columns: exportColumns,
             filename: `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}`,
-            metadata: { generatedBy: 'Security Operations', ...metadata }
+            metadata: { 
+                generatedBy: 'Security Operations',
+                period: period || 'Live Feed'
+            },
+            orientation: 'l' // Landscape to fit extra columns securely
+        });
+    };
+
+    const handleExcelExport = () => {
+        // Exclude 'actions' column from Excel report as requested
+        const exportColumns = columns.filter(col => col.key !== 'actions');
+
+        exportToExcel({
+            title: title,
+            data: data,
+            columns: exportColumns,
+            filename: `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date().toISOString().split('T')[0]}`,
+            metadata: { 
+                period: period || 'Live Feed'
+            }
         });
     };
 
     const getStatusBadge = (status) => {
+        if (!status) return <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>N/A</span>;
+
         let styles = {
             display: 'inline-flex',
             alignItems: 'center',
@@ -24,15 +48,18 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
             fontWeight: 600
         };
 
-        switch (status.toLowerCase()) {
+        const lowerStatus = status.toLowerCase();
+        switch (lowerStatus) {
             case 'approved':
             case 'confirmed':
             case 'auto-confirmed':
             case 'checked-in':
+            case 'authorized':
                 return <span style={{ ...styles, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent)' }}><CheckCircle size={12} /> {status}</span>;
             case 'pending':
                 return <span style={{ ...styles, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}><Clock size={12} /> {status}</span>;
             case 'rejected':
+            case 'denied':
             case 'closed':
                 return <span style={{ ...styles, backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)' }}><XCircle size={12} /> {status}</span>;
             default:
@@ -41,6 +68,8 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
     };
 
     const getMethodBadge = (method) => {
+        if (!method) return <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Manual</span>;
+
         let styles = {
             display: 'inline-flex',
             alignItems: 'center',
@@ -51,12 +80,12 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
             fontWeight: 600
         };
 
-        if (method && method.includes('Agent-Auto')) {
+        if (method.includes('Agent-Auto') || method.includes('SBU-Auth')) {
             return <span style={{ ...styles, backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--accent)' }}>🤖 {method}</span>;
-        } else if (method && method.includes('Manual')) {
+        } else if (method.includes('Manual')) {
             return <span style={{ ...styles, backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning)' }}>👤 {method}</span>;
         } else {
-            return <span style={{ ...styles, backgroundColor: 'var(--background)', color: 'var(--text-muted)' }}>{method || 'N/A'}</span>;
+            return <span style={{ ...styles, backgroundColor: 'var(--background)', color: 'var(--text-muted)' }}>{method}</span>;
         }
     };
 
@@ -67,12 +96,10 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
                         onClick={handleExport}
+                        className="btn-secondary"
                         style={{
-                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            color: 'var(--text-muted)',
                             padding: '0.4rem 0.8rem',
                             borderRadius: '8px',
-                            border: '1px solid var(--glass-border)',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
@@ -83,32 +110,82 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
                     >
                         <Download size={14} /> PDF
                     </button>
+                    <button
+                        onClick={handleExcelExport}
+                        className="btn-secondary"
+                        style={{
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            color: 'var(--accent)',
+                            border: '1px solid rgba(16, 185, 129, 0.2)'
+                        }}
+                    >
+                        <FileSpreadsheet size={14} /> Excel
+                    </button>
                 </div>
             </div>
 
-            <div style={{ overflowX: 'auto', margin: '0 -1.75rem' }}>
+            <div style={{ overflowX: 'auto', margin: '0 -1rem' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                     <thead>
-                        <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
-                            {columns.map((col, idx) => (
-                                <th key={idx} style={{
-                                    padding: '1rem 1.75rem',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 700,
-                                    color: 'var(--text-muted)',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.05em',
-                                    borderBottom: '1px solid var(--glass-border)'
-                                }}>
-                                    {col.header}
-                                </th>
-                            ))}
-                        </tr>
+                        {columns.some(c => c.subColumns) ? (
+                            <>
+                                <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                                    {columns.map((col, idx) => (
+                                        <th key={`top-${idx}`} colSpan={col.subColumns?.length || 1} rowSpan={col.subColumns ? 1 : 2} style={{
+                                            padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: 700,
+                                            color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                                            borderBottom: '1px solid var(--glass-border)',
+                                            borderRight: col.subColumns ? '1px solid var(--glass-border)' : 'none',
+                                            textAlign: col.subColumns ? 'center' : 'left',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {col.header}
+                                        </th>
+                                    ))}
+                                </tr>
+                                <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                                    {columns.filter(c => c.subColumns).flatMap(c => c.subColumns).map((sub, idx) => (
+                                        <th key={`bot-${idx}`} style={{
+                                            padding: '0.75rem 1rem', fontSize: '0.75rem', fontWeight: 700,
+                                            color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em',
+                                            borderBottom: '1px solid var(--glass-border)', whiteSpace: 'nowrap'
+                                        }}>
+                                            {sub.header}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </>
+                        ) : (
+                            <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.03)' }}>
+                                {columns.map((col, idx) => (
+                                    <th key={idx} style={{
+                                        padding: '0.75rem 1rem',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 700,
+                                        color: 'var(--text-muted)',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em',
+                                        borderBottom: '1px solid var(--glass-border)',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        {col.header}
+                                    </th>
+                                ))}
+                            </tr>
+                        )}
                     </thead>
                     <tbody>
                         {data.length === 0 ? (
                             <tr>
-                                <td colSpan={columns.length} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                <td colSpan={columns.flatMap(c => c.subColumns || [c]).length} style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                                     No records found for today.
                                 </td>
                             </tr>
@@ -118,12 +195,13 @@ const LogTable = ({ title, data, columns, metadata = {} }) => {
                                     borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
                                     transition: 'var(--transition)'
                                 }}>
-                                    {columns.map((col, colIdx) => (
+                                    {columns.flatMap(c => c.subColumns || [c]).map((col, colIdx) => (
                                         <td key={colIdx} style={{
-                                            padding: '1rem 1.75rem',
-                                            fontSize: '0.875rem',
+                                            padding: '0.4rem 1rem',
+                                            fontSize: '0.8125rem',
                                             color: 'var(--text-secondary)',
-                                            fontWeight: 500
+                                            fontWeight: 500,
+                                            whiteSpace: 'nowrap'
                                         }}>
                                             {col.key === 'status' ? getStatusBadge(row[col.key]) :
                                                 col.key === 'method' ? getMethodBadge(row[col.key]) :

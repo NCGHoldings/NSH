@@ -1,10 +1,22 @@
 import jsPDF from 'jspdf';
 
-// ─── Color Palette ────────────────────────────────────────────────────────────
-const C = {
-    headerBg: [15, 23, 42],       // Deep navy
-    primary: [255, 140, 0],      // Orange / gold accent
-    darkHeader: [30, 41, 59],       // Dark table header
+/**
+ * PDFExportService — Generates branded PDF reports using the Builder pattern.
+ * 
+ * Design Pattern: Builder — Chainable configuration before final export.
+ * 
+ * Usage:
+ *   await new PDFExportService('Visitor Report')
+ *     .withMetadata({ generatedBy: 'Admin', range: '2026-03' })
+ *     .addTable(columns, rows)
+ *     .export('visitor_report.pdf');
+ */
+
+// ─── Color Palette (Design System Constants) ─────────────────────────────────
+const COLORS = {
+    headerBg: [15, 23, 42],
+    primary: [255, 140, 0],
+    darkHeader: [30, 41, 59],
     white: [255, 255, 255],
     bodyText: [30, 41, 59],
     mutedText: [100, 116, 139],
@@ -15,320 +27,440 @@ const C = {
     dangerRed: [239, 68, 68],
 };
 
+/** Helper: set fill color */
 const setFill = (doc, c) => doc.setFillColor(...c);
+/** Helper: set text color */
 const setText = (doc, c) => doc.setTextColor(...c);
+/** Helper: set draw color */
 const setDraw = (doc, c) => doc.setDrawColor(...c);
 
+/** Truncate string to max length */
 const truncate = (str, max = 35) => {
     const s = str != null ? String(str) : '-';
     return s.length > max ? s.slice(0, max - 1) + '…' : s;
 };
 
-// ─── Load logo as base64 ──────────────────────────────────────────────────────
-const loadLogoBase64 = () => {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            resolve(canvas.toDataURL('image/png'));
-        };
-        img.onerror = () => resolve(null); // gracefully skip if logo missing
-        img.src = '/logo.png';
-    });
-};
+// ─── PDFExportService Class ──────────────────────────────────────────────────
 
-// ─── Header ───────────────────────────────────────────────────────────────────
-const drawHeader = (doc, title, duration, generatedTime, pageWidth, logoBase64) => {
-    const H = 62;
-
-    // Navy background
-    setFill(doc, C.headerBg);
-    doc.rect(0, 0, pageWidth, H, 'F');
-
-    // Orange left accent bar
-    setFill(doc, C.primary);
-    doc.rect(0, 0, 4, H, 'F');
-
-    // Logo (if loaded)
-    const logoSize = 20;
-    const logoX = 10;
-    const logoY = (H - logoSize) / 2;
-    if (logoBase64) {
-        doc.addImage(logoBase64, 'PNG', logoX, logoY, logoSize, logoSize);
+export class PDFExportService {
+    /**
+     * @param {string} title — Report title displayed in the header
+     */
+    constructor(title) {
+        this.title = title;
+        this.metadata = {};
+        this.tables = [];
+        this.logos = { ngs: null, lyceum: null };
+        this.orientation = 'p'; // default portrait
     }
 
-    // LEFT BLOCK — Nextgen Shield branding + report info
-    const textX = logoBase64 ? logoX + logoSize + 5 : 12;
+    /**
+     * Set PDF page orientation ('p' for portrait, 'l' for landscape).
+     * @param {string} orientation
+     * @returns {PDFExportService} this
+     */
+    withOrientation(orientation) {
+        this.orientation = orientation;
+        return this;
+    }
 
-    setText(doc, C.primary);
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Nextgen Shield (Private) Limited', textX, 16);
+    /**
+     * Set report metadata (generatedBy, range, etc.).
+     * @param {Object} metadata
+     * @returns {PDFExportService} this (Builder pattern)
+     */
+    withMetadata(metadata) {
+        this.metadata = { ...this.metadata, ...metadata };
+        return this;
+    }
 
-    // Report title (white, bold)
-    setText(doc, C.white);
-    doc.setFontSize(10.5);
-    doc.setFont('helvetica', 'bold');
-    doc.text(title, textX, 28);
+    /**
+     * Pre-load and attach the company logo.
+     * @returns {PDFExportService} this
+     */
+    async withLogo() {
+        this.logos = await PDFExportService._loadLogos();
+        return this;
+    }
 
-    // Duration line
-    setText(doc, [180, 190, 210]);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Period: ${duration}`, textX, 38);
+    /**
+     * Add a data table to the report.
+     * @param {Array<{ header: string, key: string, render?: Function }>} columns
+     * @param {Array<Object>} data — Raw data rows
+     * @returns {PDFExportService} this
+     */
+    addTable(columns, data, sectionTitle = 'Detailed Records') {
+        this.tables.push({ columns, data, sectionTitle });
+        return this;
+    }
 
-    // Generated time
-    doc.text(`Generated: ${generatedTime}`, textX, 46);
+    /**
+     * Generate and save the PDF.
+     * @param {string} filename
+     * @returns {Promise<void>}
+     */
+    async export(filename) {
+        // Auto-load logos if not already loaded
+        if (!this.logos.ngs) {
+            await this.withLogo();
+        }
 
-    // RIGHT BLOCK — Client/School info
-    const rightX = pageWidth - 14;
-    setText(doc, C.white);
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Iyceum International School (Private) Limited', rightX, 16, { align: 'right' });
+        const doc = new jsPDF(this.orientation, 'mm', 'a4');
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
 
-    setText(doc, [180, 190, 210]);
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Panadura', rightX, 24, { align: 'right' });
-    doc.text('8/3A, Arthur V. Dias Mawatha, 12500, Sri Lanka', rightX, 31, { align: 'right' });
+        // 1. Header
+        let y = this._drawHeader(doc, pageWidth) + 8;
 
-    // Thin orange separator line at bottom of header
-    setDraw(doc, C.primary);
-    doc.setLineWidth(0.8);
-    doc.line(0, H, pageWidth, H);
+        // 2. Info table
+        y = this._drawInfoTable(doc, y, pageWidth);
 
-    return H;
-};
+        // 3. Data tables
+        for (const table of this.tables) {
+            setText(doc, COLORS.bodyText);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'bold');
+            doc.text(table.sectionTitle || 'Detailed Records', 14, y + 4);
+            y += 8;
 
-// ─── Info Table ───────────────────────────────────────────────────────────────
-const drawInfoTable = (doc, metadata, startY, pageWidth) => {
-    const margin = 14;
-    const tableW = pageWidth - margin * 2;
-    const colW = tableW / 4;
-    const hH = 8, vH = 9;
+            const rows = this._flattenTableRows(table.columns, table.data);
+            y = this._drawTable(doc, table.columns, rows, y, pageWidth);
+            y += 6;
+        }
 
-    setText(doc, C.bodyText);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Report Information', margin, startY + 5);
+        // 4. Footer on every page
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            this._drawFooter(doc, pageWidth, pageHeight, i, pageCount);
+        }
 
-    const tY = startY + 8;
+        const outputName = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+        doc.save(outputName);
+    }
 
-    // Header row (orange)
-    setFill(doc, C.primary);
-    doc.rect(margin, tY, tableW, hH, 'F');
-    setText(doc, C.headerBg);
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'bold');
-    ['Generated By', 'Report Status', 'Generated At', 'Period'].forEach((h, i) => {
-        doc.text(h, margin + i * colW + 3, tY + 5.5);
-    });
+    // ─── Private Drawing Methods ─────────────────────────────────────────────
 
-    // Value row (white)
-    setFill(doc, C.white);
-    setDraw(doc, C.border);
-    doc.setLineWidth(0.3);
-    doc.rect(margin, tY + hH, tableW, vH, 'FD');
-    setText(doc, C.bodyText);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    [
-        metadata.generatedBy || 'System Admin',
-        'Complete',
-        metadata.generatedTime || new Date().toLocaleString(),
-        metadata.duration || metadata.range || 'Live Feed',
-    ].forEach((v, i) => {
-        doc.text(String(v), margin + i * colW + 3, tY + hH + 6);
-    });
+    _drawHeader(doc, pageWidth) {
+        const H = 45; // Further reduced header height
 
-    return tY + hH + vH + 8;
-};
+        setFill(doc, COLORS.headerBg);
+        doc.rect(0, 0, pageWidth, H, 'F');
 
-// ─── Manual Table Drawing ─────────────────────────────────────────────────────
-const drawTable = (doc, columns, rows, startY, pageWidth) => {
-    const margin = 14;
-    const tableW = pageWidth - margin * 2;
-    const colW = tableW / columns.length;
-    const rowH = 8;
-    const headerH = 9;
+        setFill(doc, COLORS.primary);
+        doc.rect(0, 0, 4, H, 'F');
 
-    let y = startY;
+        const logoSize = 12;
+        const textMargin = 12;
+        const topY = 8;
 
-    const drawRowHeader = () => {
-        setFill(doc, C.darkHeader);
-        doc.rect(margin, y, tableW, headerH, 'F');
-        setText(doc, C.white);
+        // --- 1. Logos ---
+        if (this.logos.ngs) {
+            // NGS logo is 843x1024 (0.82:1 ratio)
+            const ngsH = 12;
+            const ngsW = ngsH * 0.82;
+            doc.addImage(this.logos.ngs, 'PNG', textMargin, topY, ngsW, ngsH);
+        }
+        if (this.logos.lyceum) {
+            // New Lyceum logo from user is 1024x224 (approx 4.57:1 ratio)
+            const lyceumW = 55; 
+            const lyceumH = lyceumW / 4.57;
+            doc.addImage(this.logos.lyceum, 'PNG', pageWidth - textMargin - lyceumW, topY + 2, lyceumW, lyceumH);
+        }
+
+        // --- 2. Centered Title (Now at bottom of header to avoid overlap) ---
+        setText(doc, COLORS.white);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        const displayTitle = this.title === 'Visitor Logs' ? 'VISITOR LOG' : 
+                            this.title === 'Vehicle Logs' ? 'VEHICLE LOG' : 
+                            this.title.toUpperCase();
+        doc.text(displayTitle, pageWidth / 2, H - 8, { align: 'center' });
+
+        // --- 3. Left Side: Nextgen Shield ---
+        const leftTextX = textMargin + logoSize + 4;
+        setText(doc, COLORS.primary);
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Nextgen Shield (Private) Limited', leftTextX, topY + 4);
+
+        setText(doc, COLORS.white);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text('10 Raymond Rd, 9th Floor, Nugegoda', leftTextX, topY + 8);
+        doc.text('Contact: 077 771 3900', leftTextX, topY + 11);
+
+        // --- 4. Right Side: Lyceum (Now using final provided brand asset) ---
+        const rightTextX = pageWidth - textMargin;
+        setText(doc, COLORS.white);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.text('Walana, Panadura, Sri Lanka', rightTextX, topY + 16, { align: 'right' });
+        doc.text('Contact: 0384 548 585', rightTextX, topY + 19, { align: 'right' });
+
+        setDraw(doc, COLORS.primary);
+        doc.setLineWidth(0.8);
+        doc.line(0, H, pageWidth, H);
+
+        return H;
+    }
+
+    _drawInfoTable(doc, startY, pageWidth) {
+        const margin = 14;
+        const tableW = pageWidth - margin * 2;
+        const colW = tableW / 4;
+        const hH = 8, vH = 9;
+
+        setText(doc, COLORS.bodyText);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Report Information', margin, startY + 5);
+
+        const tY = startY + 8;
+
+        setFill(doc, COLORS.primary);
+        doc.rect(margin, tY, tableW, hH, 'F');
+        setText(doc, COLORS.headerBg);
         doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold');
-        columns.forEach((col, i) => {
-            doc.text(col.header.toUpperCase(), margin + i * colW + colW / 2, y + 6, { align: 'center' });
-        });
-        y += headerH;
-    };
-
-    const checkPageBreak = () => {
-        const pageH = doc.internal.pageSize.getHeight();
-        if (y + rowH > pageH - 20) {
-            doc.addPage();
-            y = 20;
-            drawRowHeader();
-        }
-    };
-
-    drawRowHeader();
-
-    rows.forEach((row, rowIdx) => {
-        checkPageBreak();
-
-        if (rowIdx % 2 === 1) {
-            setFill(doc, C.rowAlt);
-            doc.rect(margin, y, tableW, rowH, 'F');
-        }
-
-        setDraw(doc, C.border);
-        doc.setLineWidth(0.2);
-        doc.rect(margin, y, tableW, rowH, 'D');
-
-        row.forEach((cell, i) => {
-            const cellText = String(cell ?? '-');
-            const lower = cellText.toLowerCase();
-
-            if (['checked-in', 'approved', 'confirmed', 'complete', 'scheduled'].some(s => lower.includes(s))) {
-                setText(doc, C.successGreen);
-                doc.setFont('helvetica', 'bold');
-            } else if (['pending', 'in progress', 'meeting requested'].some(s => lower.includes(s))) {
-                setText(doc, C.warningAmber);
-                doc.setFont('helvetica', 'bold');
-            } else if (['denied', 'rejected', 'cancelled'].some(s => lower.includes(s))) {
-                setText(doc, C.dangerRed);
-                doc.setFont('helvetica', 'bold');
-            } else if (i === 0) {
-                setText(doc, C.bodyText);
-                doc.setFont('helvetica', 'bold');
-            } else {
-                setText(doc, C.bodyText);
-                doc.setFont('helvetica', 'normal');
-            }
-
-            doc.setFontSize(7);
-            const clipped = doc.splitTextToSize(cellText, colW - 4)[0] || cellText;
-            doc.text(clipped, margin + i * colW + 3, y + 5.5);
+        ['Generated By', 'Report Status', 'Report Date', 'Time Period'].forEach((h, i) => {
+            doc.text(h, margin + i * colW + 3, tY + 5.5);
         });
 
-        y += rowH;
-    });
+        setFill(doc, COLORS.white);
+        setDraw(doc, COLORS.border);
+        doc.setLineWidth(0.3);
+        doc.rect(margin, tY + hH, tableW, vH, 'FD');
+        setText(doc, COLORS.bodyText);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        [
+            this.metadata.generatedBy || 'Security Operations',
+            'Finalized',
+            new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            this.metadata.period || this.metadata.range || 'Live Feed',
+        ].forEach((v, i) => {
+            doc.text(String(v), margin + i * colW + 3, tY + hH + 6);
+        });
 
-    return y;
-};
-
-// ─── Footer ───────────────────────────────────────────────────────────────────
-const drawFooter = (doc, pageWidth, pageHeight, pageNum, pageCount) => {
-    const y = pageHeight - 12;
-    setDraw(doc, C.border);
-    doc.setLineWidth(0.3);
-    doc.line(14, y - 3, pageWidth - 14, y - 3);
-
-    setText(doc, C.mutedText);
-    doc.setFontSize(6.5);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Nextgen Shield (Private) Limited  •  Confidential', 14, y + 1);
-    doc.text(`Page ${pageNum} of ${pageCount}`, pageWidth - 14, y + 1, { align: 'right' });
-};
-
-// ─── Duration Label Helper ────────────────────────────────────────────────────
-const getDurationLabel = (range, startDate, endDate) => {
-    if (startDate && endDate) {
-        return `${startDate} – ${endDate}`;
+        return tY + hH + vH + 8;
     }
-    if (!range) return 'All Time';
-    const now = new Date();
-    const fmt = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    switch (range) {
-        case 'Today': {
-            const start = new Date(now); start.setHours(0, 0, 0, 0);
-            return `${fmt(start)} 00:00 – ${fmt(now)} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-        }
-        case 'Weekly': {
-            const start = new Date(now); start.setDate(now.getDate() - 7);
-            return `${fmt(start)} – ${fmt(now)}`;
-        }
-        case 'Monthly': {
-            const start = new Date(now); start.setMonth(now.getMonth() - 1);
-            return `${fmt(start)} – ${fmt(now)}`;
-        }
-        case 'Annual': {
-            const start = new Date(now); start.setFullYear(now.getFullYear() - 1);
-            return `${fmt(start)} – ${fmt(now)}`;
-        }
-        default: return range;
-    }
-};
 
-// ─── Main Export ──────────────────────────────────────────────────────────────
-export const exportToPDF = async (options) => {
-    const { title, data, columns, filename, metadata = {} } = options;
+    _drawTable(doc, columns, rows, startY, pageWidth) {
+        const margin = 14;
+        const tableW = pageWidth - margin * 2;
+        const flatColumns = columns.flatMap(c => c.subColumns || [c]);
+        const colW = tableW / flatColumns.length;
+        const hasGroups = columns.some(c => c.subColumns);
+        const rowH = 8;
+        const headerH = hasGroups ? 14 : 9;
+        let y = startY;
 
-    // Compute derived time info
-    const now = new Date();
-    const generatedTime = now.toLocaleString('en-GB', {
-        day: '2-digit', month: 'short', year: 'numeric',
-        hour: '2-digit', minute: '2-digit', second: '2-digit'
-    });
-    const duration = getDurationLabel(metadata.range, metadata.startDate, metadata.endDate);
+        const drawRowHeader = () => {
+            setFill(doc, COLORS.darkHeader);
+            doc.rect(margin, y, tableW, headerH, 'F');
+            setText(doc, COLORS.white);
+            doc.setFontSize(7.5);
+            doc.setFont('helvetica', 'bold');
+            
+            doc.setDrawColor(255, 255, 255);
+            doc.setLineWidth(0.1);
 
-    // Load logo before building PDF
-    const logoBase64 = await loadLogoBase64();
-
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-
-    // 1. Header (logo + NGS branding + dynamic title with period + client company)
-    let y = drawHeader(doc, title, duration, generatedTime, pageWidth, logoBase64) + 8;
-
-    // 2. Info table
-    y = drawInfoTable(doc, { ...metadata, generatedTime, duration }, y, pageWidth);
-
-    // 3. Section label
-    setText(doc, C.bodyText);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Detailed Records', 14, y + 4);
-    y += 8;
-
-    // 4. Build table rows (flatten React elements to plain strings)
-    const tableRows = data.map(row =>
-        columns.map(col => {
-            let val = row[col.key];
-            if (col.render) {
-                try {
-                    const rendered = col.render(val, row);
-                    if (rendered !== null && typeof rendered === 'object' && rendered.$$typeof) {
-                        val = val != null ? String(val) : '-';
-                    } else {
-                        val = rendered;
+            if (hasGroups) {
+                let currentX = margin;
+                
+                columns.forEach((col) => {
+                    const span = col.subColumns ? col.subColumns.length : 1;
+                    const w = colW * span;
+                    const textY = col.subColumns ? y + 5.5 : y + 9;
+                    
+                    let headText = col.header.toUpperCase();
+                    if (headText === 'EMPLOYEE CODE/ID') headText = 'EMP. CODE/ID';
+                    if (doc.getTextWidth(headText) > w - 2) {
+                        headText = doc.splitTextToSize(headText, w - 2)[0] || headText;
                     }
-                } catch (_) { /* keep raw val */ }
+                    doc.text(headText, currentX + w / 2, textY, { align: 'center' });
+                    
+                    // Vertical dividers for the column block
+                    doc.line(currentX, y, currentX, y + headerH);
+                    doc.line(currentX + w, y, currentX + w, y + headerH);
+                    
+                    if (col.subColumns) {
+                        // Horizontal divider for grouped block
+                        doc.line(currentX, y + 7.5, currentX + w, y + 7.5);
+                        
+                        let subX = currentX;
+                        col.subColumns.forEach(sub => {
+                            // Vertical dividers for inner sub-columns
+                            if (subX > currentX) {
+                                doc.line(subX, y + 7.5, subX, y + headerH);
+                            }
+                            let subText = sub.header.toUpperCase();
+                            if (doc.getTextWidth(subText) > colW - 2) {
+                                subText = doc.splitTextToSize(subText, colW - 2)[0] || subText;
+                            }
+                            doc.text(subText, subX + colW / 2, y + 11.5, { align: 'center' });
+                            subX += colW;
+                        });
+                    }
+                    currentX += w;
+                });
+            } else {
+                columns.forEach((col, i) => {
+                    const currentX = margin + i * colW;
+                    let headText = col.header.toUpperCase();
+                    if (headText === 'EMPLOYEE CODE/ID') headText = 'EMP. CODE/ID';
+                    if (doc.getTextWidth(headText) > colW - 2) {
+                        headText = doc.splitTextToSize(headText, colW - 2)[0] || headText;
+                    }
+                    doc.text(headText, currentX + colW / 2, y + 6, { align: 'center' });
+                    doc.line(currentX, y, currentX, y + headerH);
+                });
+                doc.line(margin + tableW, y, margin + tableW, y + headerH);
             }
-            return truncate(val);
-        })
-    );
+            y += headerH;
+        };
 
-    // 5. Draw table
-    drawTable(doc, columns, tableRows, y, pageWidth);
+        const checkPageBreak = () => {
+            const pageH = doc.internal.pageSize.getHeight();
+            if (y + rowH > pageH - 20) {
+                doc.addPage();
+                y = 20;
+                drawRowHeader();
+            }
+        };
 
-    // 6. Footer on every page
-    const pageCount = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        drawFooter(doc, pageWidth, pageHeight, i, pageCount);
+        drawRowHeader();
+
+        rows.forEach((row, rowIdx) => {
+            checkPageBreak();
+
+            if (rowIdx % 2 === 1) {
+                setFill(doc, COLORS.rowAlt);
+                doc.rect(margin, y, tableW, rowH, 'F');
+            }
+
+            setDraw(doc, COLORS.border);
+            doc.setLineWidth(0.2);
+            doc.rect(margin, y, tableW, rowH, 'D');
+
+            row.forEach((cell, i) => {
+                const cellText = String(cell ?? '-');
+                const lower = cellText.toLowerCase();
+
+                if (['checked-in', 'approved', 'confirmed', 'complete', 'scheduled'].some(s => lower.includes(s))) {
+                    setText(doc, COLORS.successGreen);
+                    doc.setFont('helvetica', 'bold');
+                } else if (['pending', 'in progress', 'meeting requested'].some(s => lower.includes(s))) {
+                    setText(doc, COLORS.warningAmber);
+                    doc.setFont('helvetica', 'bold');
+                } else if (['denied', 'rejected', 'cancelled'].some(s => lower.includes(s))) {
+                    setText(doc, COLORS.dangerRed);
+                    doc.setFont('helvetica', 'bold');
+                } else if (i === 0) {
+                    setText(doc, COLORS.bodyText);
+                    doc.setFont('helvetica', 'bold');
+                } else {
+                    setText(doc, COLORS.bodyText);
+                    doc.setFont('helvetica', 'normal');
+                }
+
+                doc.setFontSize(7);
+                const clipped = doc.splitTextToSize(cellText, colW - 4)[0] || cellText;
+                doc.text(clipped, margin + i * colW + 3, y + 5.5);
+            });
+
+            y += rowH;
+        });
+
+        return y;
     }
 
-    doc.save(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
+    _drawFooter(doc, pageWidth, pageHeight, pageNum, pageCount) {
+        const y = pageHeight - 12;
+        setDraw(doc, COLORS.border);
+        doc.setLineWidth(0.3);
+        doc.line(14, y - 3, pageWidth - 14, y - 3);
+
+        setText(doc, COLORS.mutedText);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.text('Nextgen Shield (Private) Limited  •  Confidential', 14, y + 1);
+        doc.text(`Page ${pageNum} of ${pageCount}`, pageWidth - 14, y + 1, { align: 'right' });
+    }
+
+    _flattenTableRows(columns, data) {
+        const flatColumns = columns.flatMap(c => c.subColumns || [c]);
+        return data.map(row =>
+            flatColumns.map(col => {
+                let val = row[col.key];
+                if (col.render) {
+                    try {
+                        const rendered = col.render(val, row);
+                        if (rendered !== null && typeof rendered === 'object' && rendered.$$typeof) {
+                            val = val != null ? String(val) : '-';
+                        } else {
+                            val = rendered;
+                    }  } catch /* eslint-disable-line no-unused-vars */ (___unused) { /* keep raw val */ }
+                }
+                return truncate(val);
+            })
+        );
+    }
+
+    // ─── Static Helpers ──────────────────────────────────────────────────────
+
+    static _loadLogos() {
+        const paths = {
+            ngs: '/ngs-logo.png',
+            lyceum: '/lyceum-logo.png',
+            fallback: '/logo.png'
+        };
+
+        const loadOne = (url) => new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                img.getContext('2d').drawImage(img, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.onerror = () => resolve(null);
+            img.src = url;
+            // Fix for canvas drawer typo
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+            };
+        });
+
+        return (async () => {
+            const [ngs, lyceum] = await Promise.all([
+                loadOne(paths.ngs),
+                loadOne(paths.lyceum)
+            ]);
+            return { ngs, lyceum };
+        })();
+    }
+}
+
+// ─── Legacy API (backward-compatible) ────────────────────────────────────────
+
+/**
+ * @deprecated Use `new PDFExportService(title).addTable(columns, data).export(filename)` instead.
+ */
+export const exportToPDF = async (options) => {
+    const { title, data, columns, filename, metadata = {}, orientation = 'p' } = options;
+
+    await new PDFExportService(title)
+        .withOrientation(orientation)
+        .withMetadata(metadata)
+        .addTable(columns, data)
+        .export(filename);
 };

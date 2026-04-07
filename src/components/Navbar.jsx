@@ -23,7 +23,7 @@ const Navbar = ({ activeTab, user, theme, toggleTheme, onToggleSidebar, isMobile
         }
     };
 
-    const isSecurityRole = ['Security Officer', 'Security HOD'].includes(user?.role);
+    const isSecurityRole = ['Admin', 'Security Officer', 'Security HOD', 'School Operations', 'School Management'].includes(user?.role);
 
     return (
         <header className="navbar" style={{
@@ -65,23 +65,8 @@ const Navbar = ({ activeTab, user, theme, toggleTheme, onToggleSidebar, isMobile
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1.5rem' }}>
-                <div style={{ position: 'relative' }} className="desktop-only">
-                    <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                    <input
-                        type="text"
-                        placeholder="Quick Search..."
-                        style={{
-                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            border: '1px solid var(--glass-border)',
-                            borderRadius: '12px',
-                            padding: '0.625rem 1rem 0.625rem 2.5rem',
-                            fontSize: '0.875rem',
-                            color: 'var(--text-main)',
-                            width: '240px',
-                            transition: 'var(--transition)'
-                        }}
-                    />
-                </div>
+                {/* Quick Search Removed - Localized search now available in each view */}
+
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     {isSecurityRole && (
@@ -157,7 +142,7 @@ const Navbar = ({ activeTab, user, theme, toggleTheme, onToggleSidebar, isMobile
                     }} className="desktop-only"></div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                         <div style={{ textAlign: 'right' }} className="desktop-only">
-                            <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-main)' }}>{user?.role || 'User'}</p>
+                            <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-main)' }}>{user?.username || 'User'}</p>
                         </div>
                         <div style={{
                             width: isMobile ? '32px' : '40px',
